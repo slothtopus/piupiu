@@ -2,6 +2,8 @@
   <div class="map-block" :style="colorStyle">
     <img
       v-if="isPlayerBlock"
+      width="100%"
+      height="100%"
       src="@/assets/play-button.svg"
       :style="rotatePlayerStyle"
     />
@@ -33,7 +35,7 @@ export default {
         case 1:
           return { backgroundColor: 'black' }
           break
-        case 6:
+        case 10:
           return { backgroundColor: 'red' }
           break
         default:
@@ -41,20 +43,24 @@ export default {
       }
     },
     isPlayerBlock() {
-      return [2, 3, 4, 5].includes(this.type)
+      return [2, 3, 4, 5, 6, 7, 8, 9].includes(this.type)
     },
     rotatePlayerStyle() {
       switch (this.type) {
         case 2:
+        case 6:
           return { transform: 'rotate(-90deg)' }
           break
         case 3:
+        case 7:
           return { transform: 'rotate(0deg)' }
           break
         case 4:
+        case 8:
           return { transform: 'rotate(90deg)' }
           break
         case 5:
+        case 9:
           return { transform: 'rotate(180deg)' }
           break
         default:
