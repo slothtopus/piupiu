@@ -84,6 +84,18 @@ class BattleGround {
     return this.map_vals.length
   }
 
+  getStateSize() {
+    return [this.map_vals.length, this.map_vals[0].length]
+  }
+
+  getStateLevels() {
+    return 11
+  }
+
+  getActions() {
+    return ['up', 'down', 'left', 'right', 'fire', 'none']
+  }
+
   extractNonWallBlocks(map_vals) {
     let blocks = []
     map_vals.forEach((row_vals, row) => {
@@ -97,12 +109,12 @@ class BattleGround {
   }
 
   getStateAsPlayer(player) {
-    if (player == 0) {
-      return this.getState()
-    } else if (player == 1) {
-      // Create a copy of the 2 dimensional array
-      let state = this.getState().map(x => [...x])
+    // create a copy of the two-dimensional state array
+    let state = this.getState().map(x => [...x])
 
+    if (player == 0) {
+      return state
+    } else if (player == 1) {
       // Make player 1 look like player 2
       state[this.player_locations[0][0]][
         this.player_locations[0][1]

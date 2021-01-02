@@ -13,6 +13,8 @@ class QTableAgent {
 
   qTable = {}
 
+  canUseReducedState = true // If we can use game state reduced (i.e without the walls)
+
   constructor(actions) {
     this.actions = actions
   }

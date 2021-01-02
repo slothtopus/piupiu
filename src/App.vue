@@ -27,6 +27,7 @@
 import Map from './components/Map.vue'
 import { maps, BattleGround } from '@/js/maps.js'
 import { QTableAgent } from '@/js/QTableAgent.js'
+import { DQNAgent } from '@/js/DQNAgent.js'
 
 export default {
   name: 'App',
@@ -60,6 +61,15 @@ export default {
     //this.stateSize = this.battleGround.getStateSize()
     this.agent = new QTableAgent(this.battleGround.actions)
     //this.keyWatcher = setInterval(this.takeAction, 100)
+    let dqn_agent = new DQNAgent(
+      this.battleGround.getStateSize(),
+      this.battleGround.getStateLevels(),
+      this.battleGround.getActions(),
+      this.battleGround.getState()
+    )
+    dqn_agent.createModel4()
+    this.agent = dqn_agent
+    //dqn_agent.chooseAction(this.battleGround.getState())
   },
   created() {
     window.addEventListener('keydown', event => {
@@ -79,6 +89,7 @@ export default {
     },
     singleMove() {
       this.doMove()
+      this.updateMapFromState(true)
     },
     doMove(newGame = false) {
       if (newGame) {
@@ -94,16 +105,29 @@ export default {
         return
       }
 
-      let state = this.battleGround.getReducedStateAsPlayer(this.currentPlayer)
+      let state
+      if (this.agent.canUseReducedState) {
+        state = this.battleGround.getReducedStateAsPlayer(this.currentPlayer)
+      } else {
+        state = this.battleGround.getStateAsPlayer(this.currentPlayer)
+      }
+
       let action = this.agent.chooseAction(state)
       let reward = this.battleGround.action(action, this.currentPlayer)
-      console.log('action/reward:', action, reward)
-      let new_state = this.battleGround.getReducedStateAsPlayer(
-        this.currentPlayer
-      )
-      this.agent.update(state, new_state, action, reward[0])
+      //console.log('action/reward:', action, reward)
 
-      this.stateSize = Object.keys(this.agent.qTable).length
+      let new_state
+      if (this.agent.canUseReducedState) {
+        new_state = this.battleGround.getReducedStateAsPlayer(
+          this.currentPlayer
+        )
+      } else {
+        new_state = this.battleGround.getStateAsPlayer(this.currentPlayer)
+      }
+
+      this.agent.update(state, new_state, action, reward[0], reward[1])
+
+      this.stateSize = Object.keys(this.agent.experience_buffer_obj).length
       this.moveNumber += 1
 
       this.updateMapFromState()
@@ -121,8 +145,8 @@ export default {
         setTimeout(this.doMove, this.speed, start_new_game_next_loop)
       }
     },
-    updateMapFromState() {
-      if (this.speed > 0) {
+    updateMapFromState(override = false) {
+      if (this.speed > 0 || override) {
         this.map_vals = [...this.battleGround.getState()]
       }
     },
