@@ -67,7 +67,8 @@ export default {
       this.battleGround.getActions(),
       this.battleGround.getState()
     )
-    dqn_agent.createModel4()
+    //dqn_agent.createModel4()
+    //dqn_agent.createModelConv('dqn')
     this.agent = dqn_agent
     //dqn_agent.chooseAction(this.battleGround.getState())
   },
