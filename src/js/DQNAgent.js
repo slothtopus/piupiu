@@ -192,6 +192,8 @@ class DQNAgent {
 
     const optimiser = tf.train.rmsprop(this.learning_rate)
     this.models['dqn']['optimiser'] = optimiser
+
+    //this.models['dqn']['estimate_Q']([this.example_state])
   }
 
   createConvolutionModel(model_name) {
@@ -263,22 +265,47 @@ class DQNAgent {
     this.models[model_name]['layers']['flatten'] = flatten
     this.models[model_name]['outputs']['flatten'] = flatten_output_shape
 
-    const fc1 = tf.layers.dense({
+    const fc1_value = tf.layers.dense({
       units: 64,
       activation: 'elu'
     })
-    fc1.build(flatten_output_shape)
-    const fc1_output_shape = fc1.computeOutputShape(flatten_output_shape)
-    this.models[model_name]['layers']['fc1'] = fc1
-    this.models[model_name]['outputs']['fc1'] = fc1_output_shape
+    fc1_value.build(flatten_output_shape)
+    const fc1_value_output_shape = fc1_value.computeOutputShape(
+      flatten_output_shape
+    )
+    this.models[model_name]['layers']['fc1_value'] = fc1_value
+    this.models[model_name]['outputs']['fc1_value'] = fc1_value_output_shape
 
-    const fc2 = tf.layers.dense({
+    const fc2_value = tf.layers.dense({
+      units: 1
+    })
+    fc2_value.build(fc1_value_output_shape)
+    const fc2_value_output_shape = fc2_value.computeOutputShape(
+      fc1_value_output_shape
+    )
+    this.models[model_name]['layers']['fc2_value'] = fc2_value
+    this.models[model_name]['outputs']['fc2_value'] = fc2_value_output_shape
+
+    const fc1_action = tf.layers.dense({
+      units: 64,
+      activation: 'elu'
+    })
+    fc1_action.build(flatten_output_shape)
+    const fc1_action_output_shape = fc1_action.computeOutputShape(
+      flatten_output_shape
+    )
+    this.models[model_name]['layers']['fc1_action'] = fc1_action
+    this.models[model_name]['outputs']['fc1_action'] = fc1_action_output_shape
+
+    const fc2_action = tf.layers.dense({
       units: this.actions.length
     })
-    fc2.build(fc1_output_shape)
-    const fc2_output_shape = fc1.computeOutputShape(fc1_output_shape)
-    this.models[model_name]['layers']['fc2'] = fc2
-    this.models[model_name]['outputs']['fc2'] = fc2_output_shape
+    fc2_action.build(fc1_action_output_shape)
+    const fc2_action_output_shape = fc2_action.computeOutputShape(
+      fc1_action_output_shape
+    )
+    this.models[model_name]['layers']['fc2_action'] = fc2_action
+    this.models[model_name]['outputs']['fc2_action'] = fc2_action_output_shape
   }
 
   setupEstimateQFunction(model_name) {
@@ -299,8 +326,13 @@ class DQNAgent {
           training: training
         })
         x = getLayer('flatten').call(x)
-        x = getLayer('fc1').call(x)
-        x = getLayer('fc2').call(x)
+        let v
+        v = getLayer('fc1_value').call(x)
+        v = getLayer('fc2_value').call(v)
+        let a
+        a = getLayer('fc1_action').call(x)
+        a = getLayer('fc2_action').call(a)
+        x = tf.add(v, tf.sub(a, tf.mean(a, 1, true)))
         return x
       })
 
