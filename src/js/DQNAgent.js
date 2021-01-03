@@ -43,7 +43,7 @@ class DQNAgent {
 
     if (Math.random() > epsilon) {
       // Take best action
-      let index = this.models['dqn']['estimate_best_action_index']([state])[0]
+      let index = this.DQNEstimateBestActionIndex([state])[0]
       let action = this.actions[index]
       console.log('BEST action: ', action, ' | epsilon: ', epsilon)
       return action
@@ -100,15 +100,12 @@ class DQNAgent {
         this.copyModelWeights('dqn', 'target')
       }
 
+      // Double Q network state estimation
       let Q_vals_next_state
       if (this.training_steps <= this.tau) {
-        Q_vals_next_state = this.models['dqn']['estimate_best_action_val'](
-          next_states
-        )
+        Q_vals_next_state = this.DQNEstimateBestActionVal(next_states)
       } else {
-        Q_vals_next_state = this.models['target']['estimate_best_action_val'](
-          next_states
-        )
+        Q_vals_next_state = this.doubleNetworkEstimateNextState(next_states)
       }
 
       const target_Qs = batch.map((b, i) => {
@@ -119,11 +116,11 @@ class DQNAgent {
         }
       })
 
-      this.models['dqn']['optimise'](states, actions, target_Qs)
+      this.DQNOptimise(states, actions, target_Qs)
       this.training_steps += 1
 
       let loss = tf.tidy(() =>
-        this.models['dqn']['loss'](states, actions, target_Qs).dataSync()
+        this.DQNLoss(states, actions, target_Qs).dataSync()
       )[0]
 
       this.losses.push(loss)
@@ -159,7 +156,12 @@ class DQNAgent {
   /* ------ Helpers ------- */
   oneHotEncode(input, levels) {
     return tf.tidy(() => {
-      let input_tensor = tf.tensor(input, null, 'int32')
+      let input_tensor
+      if (input.constructor.name == 'Tensor') {
+        input_tensor = input
+      } else {
+        input_tensor = tf.tensor(input, null, 'int32')
+      }
       const input_tensor_shape = input_tensor.shape
       input_tensor = input_tensor.flatten().as1D()
       input_tensor = tf.oneHot(input_tensor, levels)
@@ -183,10 +185,13 @@ class DQNAgent {
 
   setupModels() {
     this.createConvolutionModel('dqn')
-    this.setUpEstimationFunctions('dqn')
-    this.setupOptimisationFunctions('dqn')
     this.createConvolutionModel('target')
-    this.setUpEstimationFunctions('target')
+
+    this.setupEstimateQFunction('dqn')
+    this.setupEstimateQFunction('target')
+
+    const optimiser = tf.train.rmsprop(this.learning_rate)
+    this.models['dqn']['optimiser'] = optimiser
   }
 
   createConvolutionModel(model_name) {
@@ -196,7 +201,6 @@ class DQNAgent {
     */
 
     // input shape [null, 10, 9, ]
-    debugger
     this.models[model_name] = {}
     this.models[model_name]['layers'] = {}
     this.models[model_name]['outputs'] = {}
@@ -275,6 +279,145 @@ class DQNAgent {
     const fc2_output_shape = fc1.computeOutputShape(fc1_output_shape)
     this.models[model_name]['layers']['fc2'] = fc2
     this.models[model_name]['outputs']['fc2'] = fc2_output_shape
+  }
+
+  setupEstimateQFunction(model_name) {
+    const getLayer = layer_name => this.models[model_name]['layers'][layer_name]
+
+    const estimate_Q = (states, training) =>
+      tf.tidy(() => {
+        const states_tensor = this.oneHotEncode(
+          states,
+          this.state_levels
+        ).asType('float32')
+        let x = getLayer('conv1').call(states_tensor)
+        x = getLayer('conv1_batchnorm').call(x, {
+          training: training
+        })
+        x = getLayer('conv2').call(x)
+        x = getLayer('conv2_batchnorm').call(x, {
+          training: training
+        })
+        x = getLayer('flatten').call(x)
+        x = getLayer('fc1').call(x)
+        x = getLayer('fc2').call(x)
+        return x
+      })
+
+    this.models[model_name]['estimate_Q'] = estimate_Q
+  }
+
+  DQNEstimateBestActionIndex(states) {
+    /* Returns the index of the action with the highest Q val */
+    const dqn_estimate_Q = this.models['dqn']['estimate_Q']
+    return tf.tidy(() =>
+      dqn_estimate_Q(states, false)
+        .argMax(1)
+        .dataSync()
+    )
+  }
+
+  DQNEstimateBestActionVal(states) {
+    /* Returns the value of the highest Q val */
+    const dqn_estimate_Q = this.models['dqn']['estimate_Q']
+    return tf.tidy(() =>
+      dqn_estimate_Q(states, false)
+        .max(1)
+        .dataSync()
+    )
+  }
+
+  doubleNetworkEstimateNextState(states) {
+    /*
+    Uses DQN network to estimate the best action for the states
+    and uses the target network (which provides fixed Q-targets) to
+    estimate the Q val for these actions and returns them
+
+    See Double DQNs here:
+    https://www.freecodecamp.org/news/improvements-in-deep-q-learning-dueling-double-dqn-prioritized-experience-replay-and-fixed-58b130cc5682/
+    */
+    const dqn_estimate_Q = this.models['dqn']['estimate_Q']
+    const target_estimate_Q = this.models['target']['estimate_Q']
+
+    return tf.tidy(() => {
+      const dqn_action_indices = this.oneHotEncode(
+        dqn_estimate_Q(states, false).argMax(1),
+        this.actions.length
+      )
+      const target_q_vals = target_estimate_Q(states, false)
+      return tf.sum(tf.mul(target_q_vals, dqn_action_indices), 1).dataSync()
+    })
+  }
+
+  DQNLoss(states, actions, target_Q, training) {
+    /* Returns the loss for the DQN network */
+    const dqn_estimate_Q = this.models['dqn']['estimate_Q']
+
+    return tf.tidy(() => {
+      const target_Q_tensor = tf.tensor1d(target_Q)
+      const Q = dqn_estimate_Q(states, training)
+      const actions_tensor = this.oneHotEncode(
+        this.encodeActions(actions),
+        this.actions.length
+      )
+      const Q_action = tf.sum(tf.mul(Q, actions_tensor), 1)
+      const loss = tf.mean(tf.square(tf.sub(target_Q, Q_action)))
+      return loss
+    })
+  }
+
+  DQNOptimise(states, actions, target_Q) {
+    /* Runs one optimisation pass on the DQN network */
+    const optimiser = this.models['dqn']['optimiser']
+    tf.tidy(() =>
+      optimiser.minimize(() => this.DQNLoss(states, actions, target_Q, true))
+    )
+  }
+
+  /* ============================= OLD STUFF ============================= */
+
+  setUpDQNEstimationFunctions() {
+    const getLayer = layer_name => this.models['dqn']['layers'][layer_name]
+
+    const estimate_Q = (states, training) =>
+      tf.tidy(() => {
+        const states_tensor = this.oneHotEncode(
+          states,
+          this.state_levels
+        ).asType('float32')
+        let x = getLayer('conv1').call(states_tensor)
+        x = getLayer('conv1_batchnorm').call(x, {
+          training: training
+        })
+        x = getLayer('conv2').call(x)
+        x = getLayer('conv2_batchnorm').call(x, {
+          training: training
+        })
+        x = getLayer('flatten').call(x)
+        x = getLayer('fc1').call(x)
+        x = getLayer('fc2').call(x)
+        return x
+      })
+
+    const estimate_best_action_index = states =>
+      tf.tidy(() =>
+        estimate_Q(states, false)
+          .argMax(1)
+          .dataSync()
+      )
+
+    const estimate_best_action_val = states =>
+      tf.tidy(() =>
+        estimate_Q(states, false)
+          .max(1)
+          .dataSync()
+      )
+
+    this.models['dqn']['estimate_Q'] = estimate_Q
+    this.models['dqn'][
+      'estimate_best_action_index'
+    ] = estimate_best_action_index
+    this.models['dqn']['estimate_best_action_val'] = estimate_best_action_val
   }
 
   setUpEstimationFunctions(model_name) {
